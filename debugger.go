@@ -75,11 +75,10 @@ type DebugTarget struct {
 	Pid         int
 	IsAttached  bool
 	IsThread    bool
-	IsLittle    bool
 	Breakpoints map[uintptr]Breakpoint
 }
 
-func CreateDebugTarget(pid int, isAttached bool, isThread bool, isLittleEdian bool) (DebugTarget, error) {
+func CreateDebugTarget(pid int, isAttached bool, isThread bool) (DebugTarget, error) {
 	var err error = nil
 	if !isAttached {
 		attachErr := unix.PtraceAttach(pid)
@@ -94,7 +93,6 @@ func CreateDebugTarget(pid int, isAttached bool, isThread bool, isLittleEdian bo
 		Pid:         pid,
 		IsAttached:  true,
 		IsThread:    isThread,
-		IsLittle:    isLittleEdian,
 		Breakpoints: make(map[uintptr]Breakpoint),
 	}
 	return process, err
@@ -113,20 +111,19 @@ func (dt *DebugTarget) SingleStep() error {
 	return unix.PtraceSingleStep(dt.Pid);
 }
 
-func (dt *DebugTarget) ContToSignal(sig unix.Signal) error {
-	return unix.PtraceCont(dt.Pid, int(singalfilter(sig)))
-}
-
-func (dt *DebugTarget) Cont() error {
+func (dt *DebugTarget) Continue() error {
 	return unix.PtraceCont(dt.Pid, 0)
 }
 
+func (dt *DebugTarget) ContinueToSignal(sig unix.Signal) error {
+	return unix.PtraceCont(dt.Pid, int(singalfilter(sig)))
+}
 
-func (dt *DebugTarget) SyscallToSignal(sig unix.Signal) error {
+func (dt *DebugTarget) ContinueToSyscallOrSignal(sig unix.Signal) error {
 	return unix.PtraceSyscall(dt.Pid, int(singalfilter(sig)))
 }
 
-func (dt *DebugTarget) Syscall() error {
+func (dt *DebugTarget) ContinueToSyscall() error {
 	return unix.PtraceSyscall(dt.Pid, 0)
 }
 
@@ -190,19 +187,11 @@ func (dt *DebugTarget) Wait(block bool) (unix.WaitStatus, error) {
 func (dt *DebugTarget) ReadUint64(address uintptr) (uint64, error) {
 	bytes := make([]byte, 8)
 	_, err := unix.PtracePeekData(dt.Pid, address, bytes)
-	if dt.IsLittle {
-		return binary.LittleEndian.Uint64(bytes), err
-	}
-	return binary.BigEndian.Uint64(bytes), err
+	return debugerBytes2Uint64(bytes), err
 }
 
 func (dt *DebugTarget) WriteUint64(address uintptr, value uint64) error {
-	bytes := make([]byte, 8)
-	if dt.IsLittle {
-		binary.LittleEndian.PutUint64(bytes, value)
-	} else {
-		binary.BigEndian.PutUint64(bytes, value)
-	}
+	bytes := debugerUint642Bytes(value)
 	_, err := unix.PtracePokeData(dt.Pid, address, bytes)
 	return err
 }
@@ -294,13 +283,13 @@ func (dt *PtraceProcess) SetRegPC(pc uint64) error {
 	if err != nil {
 		return err
 	}
-	regs.Rip = ip
+	debugerSetRegPC(&regs, pc)
 	return dt.SetRegs(&regs)
 }
 
 func (dt *PtraceProcess) GetRegPC() (uint64, error) {
 	regs, err := dt.GetRegs()
-	return regs.Rip, err
+	return debugerGetRegPC(&regs), err
 }
 
 func (dt *PtraceProcess) SetRegSP(sp uint64) error {
@@ -308,25 +297,11 @@ func (dt *PtraceProcess) SetRegSP(sp uint64) error {
 	if err != nil {
 		return err
 	}
-	regs.Rsp = sp
+	debugerSetRegSP(&regs, sp)
 	return dt.SetRegs(&regs)
 }
 
 func (dt *PtraceProcess) GetRegSP() (uint64, error) {
 	regs, err := dt.GetRegs()
-	return regs.Rsp, err
-}
-
-func (dt *PtraceProcess) SetRegFP(fp uint64) error {
-	regs, err := dt.GetRegs()
-	if err != nil {
-		return err
-	}
-	regs.Rbp = fp
-	return p.SetRegs(&regs)
-}
-
-func (dt *PtraceProcess) GetRegFP() (uint64, error) {
-	regs, err := dt.GetRegs()
-	return regs.Rbp, err
+	return debugerGetRegSP(&regs), err
 }
