@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/binary"
 	"fmt"
 	"reflect"
 	"strings"
@@ -26,34 +25,34 @@ type Breakpoint struct {
 }
 
 func (bp *Breakpoint) Enable(dt *DebugTarget) error {
-	data, err := p.ReadUint64(b.Address)
+	data, err := dt.ReadUint64(bp.Address)
 	if err == nil {
-		b.Backup = data
-		err = p.WriteUint64(b.Address, BreakPointInstr)
+		bp.Backup = data
+		err = dt.WriteUint64(bp.Address, BreakPointInstr)
 		if err != nil {
-			errMsg := fmt.Sprintf("Error enable breakpoint at address 0x%X: %s\n", b.Address, err.Error())
+			errMsg := fmt.Sprintf("Error enable breakpoint at address 0x%X: %s\n", bp.Address, err.Error())
 			return DebugError{Message: errMsg}
 		}
-		b.Enabled = true
+		bp.Enabled = true
 		return nil
 	} else {
-		errMsg := fmt.Sprintf("Error reading bytes at address 0x%X: %s\n", b.Address, err.Error())
+		errMsg := fmt.Sprintf("Error reading bytes at address 0x%X: %s\n", bp.Address, err.Error())
 		return DebugError{Message: errMsg}
 	}
 }
 
 func (bp *Breakpoint) Disable(dt *DebugTarget, resetpc bool) error {
-	if b.Enabled {
-		b.Enabled = false
-		err := p.WriteUint64(b.Address, b.Backup)
+	if bp.Enabled {
+		bp.Enabled = false
+		err := dt.WriteUint64(bp.Address, bp.Backup)
 		if err != nil {
-			errMsg := fmt.Sprintf("Error restoring saved bytes to address 0x%X: %s", b.Address, err.Error())
+			errMsg := fmt.Sprintf("Error restoring saved bytes to address 0x%X: %s", bp.Address, err.Error())
 			return DebugError{Message: errMsg}
 		}
-		if setIp {
-			err = p.SetRegPC(uint64(b.Address))
+		if resetpc {
+			err = dt.SetRegPC(uint64(bp.Address))
 			if err != nil {
-				errMsg := fmt.Sprintf("Error set PC to 0x%X: %s", b.Address, err.Error())
+				errMsg := fmt.Sprintf("Error set PC to 0x%X: %s", bp.Address, err.Error())
 				return DebugError{Message: errMsg}
 			}
 		}
@@ -141,7 +140,7 @@ func (dt *DebugTarget) GetRegs() (unix.PtraceRegs, error) {
 	return regs, err
 }
 
-func (dt *PtraceProcess) SetRegs(regs *unix.PtraceRegs) error {
+func (dt *DebugTarget) SetRegs(regs *unix.PtraceRegs) error {
 	return unix.PtraceSetRegs(dt.Pid, regs)
 }
 
@@ -180,7 +179,7 @@ func (dt *DebugTarget) Wait(block bool) (unix.WaitStatus, error) {
 	}
 	var wstatus unix.WaitStatus
 	var rusage unix.Rusage
-	_, err := unix.Wait4(p.Pid, &wstatus, options, &rusage)
+	_, err := unix.Wait4(dt.Pid, &wstatus, options, &rusage)
 	return wstatus, err
 }
 
@@ -240,7 +239,7 @@ func (dt *DebugTarget) GetBreakpoint(address uintptr) (Breakpoint, bool) {
 	return b, ok
 }
 
-func (dt *PtraceProcess) SetBreakpoint(address uintptr) error {
+func (dt *DebugTarget) SetBreakpoint(address uintptr) error {
 	_, ok := dt.GetBreakpoint(address)
 	if !ok {
 		b := Breakpoint{
@@ -259,7 +258,7 @@ func (dt *PtraceProcess) SetBreakpoint(address uintptr) error {
 	}
 }
 
-func (dt *PtraceProcess) DelBreakpoint(address uintptr, resetpc bool) error {
+func (dt *DebugTarget) DelBreakpoint(address uintptr, resetpc bool) error {
 	b, ok := dt.GetBreakpoint(address)
 	if ok {
 		err := b.Disable(dt, resetpc)
@@ -273,12 +272,12 @@ func (dt *PtraceProcess) DelBreakpoint(address uintptr, resetpc bool) error {
 	}
 }
 
-func (dt *PtraceProcess) SetOptions(options int) error {
+func (dt *DebugTarget) SetOptions(options int) error {
 	return unix.PtraceSetOptions(dt.Pid, options)
 }
 
 
-func (dt *PtraceProcess) SetRegPC(pc uint64) error {
+func (dt *DebugTarget) SetRegPC(pc uint64) error {
 	regs, err := dt.GetRegs()
 	if err != nil {
 		return err
@@ -287,12 +286,12 @@ func (dt *PtraceProcess) SetRegPC(pc uint64) error {
 	return dt.SetRegs(&regs)
 }
 
-func (dt *PtraceProcess) GetRegPC() (uint64, error) {
+func (dt *DebugTarget) GetRegPC() (uint64, error) {
 	regs, err := dt.GetRegs()
 	return debugerGetRegPC(&regs), err
 }
 
-func (dt *PtraceProcess) SetRegSP(sp uint64) error {
+func (dt *DebugTarget) SetRegSP(sp uint64) error {
 	regs, err := dt.GetRegs()
 	if err != nil {
 		return err
@@ -301,7 +300,7 @@ func (dt *PtraceProcess) SetRegSP(sp uint64) error {
 	return dt.SetRegs(&regs)
 }
 
-func (dt *PtraceProcess) GetRegSP() (uint64, error) {
+func (dt *DebugTarget) GetRegSP() (uint64, error) {
 	regs, err := dt.GetRegs()
 	return debugerGetRegSP(&regs), err
 }
